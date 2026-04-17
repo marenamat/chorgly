@@ -1,10 +1,10 @@
 recorded_at: '2026-04-18'
-branch: main
-status: clean
+branch: issue-1
+status: branch ready for review
 summary: >
-  Workflow run: no open issues. One pipeline failure on main (run 24584609081):
-  Deploy GitHub Pages fails at Setup Pages — GitHub Pages not enabled in repo settings.
-  Documented in claude/questions.md for guardian.
+  Worked issue #1 (bootstrap): fixed README.md for chorgly, replaced
+  docs/index.html with chorgly landing page, updated docs/style.css comment.
+  Cleared resolved GitHub Pages question from questions.md (guardian set to actions).
 notes:
-  - No open issues, no open questions beyond the Pages setup item.
-  - Pipeline failure is a repo config issue, not a code bug.
+  - Pipeline failure (run 24584609081) was GitHub Pages not enabled; guardian fixed it.
+  - issue-1 branch is ready for guardian review and merge.

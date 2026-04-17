@@ -1,24 +1,26 @@
-# Claude Base
+# chorgly
 
-This is my Claude-Code base repository for central housekeeping of my
-development rules. Feel free to suggest additions by filing issues or pull
-request.
+A chore organizer for multiple people.
 
-For full documentation, setup guides, and project overview, see the
-[claude-base website](https://marenamat.github.io/claude-base/).
+Track chores that need doing — one-time tasks, recurring ones, deadline-driven ones, and those with dependencies on other chores or external events. Each chore can be restricted to specific users.
 
-## Expected workflow
+## Features
 
-There is a dedicated (virtual) machine running a clanker or a bunch of them.
-That machine should not have any write access anywhere outside itself, and
-should be regularly backed up.
+- **Chore types**: one-time, recurring (by elapsed time or fixed schedule), deadline-driven
+- **Dependencies**: chores can depend on other chores or external events
+- **Multi-user**: chores can be assigned to specific users or shared
+- **Auth**: token-based login, no passwords; admin creates users via terminal script
+- **Backend**: WebSocket, CBOR storage, hourly git snapshots
+- **Frontend**: web app (Rust/WASM + JS glue)
 
-The operator (myself) logs into the virtual machine whenever handy, pulls the
-git locally, does code review and merges, and pushes into public repo.
+## Status
+
+Early development. See [open issues](https://github.com/marenamat/chorgly/issues) for planned work.
 
 ## Initialization
 
-1. Merge this project into your project
-2. Clone your project into your clanker enclosure
-3. Setup needed tools: `./clanker-setup`
+Built on [claude-base](https://github.com/marenamat/claude-base). See that project for clanker setup.
+
+```
+./clanker-setup
 ```
