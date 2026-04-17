@@ -1,0 +1,9 @@
+{
+  "number": 20,
+  "title": "Spawning with existing project",
+  "body": "The project may actually already exist when spawning; update spawner.py to allow that.\n\nAlso, spawn chorgly:\nName: chorgly",
+  "created_at": "2026-04-17T22:08:42Z",
+  "labels": [
+    "SPAWN"
+  ]
+}
