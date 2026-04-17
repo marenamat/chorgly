@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>chorgly</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="app.css">
+</head>
+<body class="app-body">
+
+<!-- Static/no-JS fallback banner -->
+<noscript>
+  <div class="noscript-banner">
+    JavaScript is required to connect to the chorgly server.
+    Enable JS or ask your admin for the server address.
+  </div>
+</noscript>
+
+<!-- Auth screen (shown when not logged in) -->
+<section id="auth-screen" class="screen" hidden>
+  <h1>chorgly</h1>
+  <p>Enter your token to log in. Your admin sends you a link with the token.</p>
+  <form id="auth-form">
+    <label for="token-input">Token</label>
+    <input id="token-input" type="text" autocomplete="off"
+           placeholder="paste your token here" required>
+    <button type="submit">Log in</button>
+  </form>
+  <p id="auth-error" class="error" hidden></p>
+</section>
+
+<!-- Main app (shown after auth) -->
+<section id="app-screen" class="screen" hidden>
+
+  <header class="app-header">
+    <h1>chorgly</h1>
+    <span id="user-name" class="user-name"></span>
+  </header>
+
+  <!-- Pending chore list -->
+  <main>
+    <ul id="chore-list" class="chore-list">
+      <!-- populated by JS -->
+    </ul>
+    <p id="no-chores" class="empty-state" hidden>Nothing pending. Well done.</p>
+  </main>
+
+  <!-- Action buttons -->
+  <footer class="app-footer">
+    <button id="btn-add-common" class="btn-primary">+ Common chore</button>
+    <button id="btn-add-personal" class="btn-secondary">+ My chore</button>
+  </footer>
+
+</section>
+
+<!-- Add-chore dialog -->
+<dialog id="add-chore-dialog">
+  <form id="add-chore-form" method="dialog">
+    <h2 id="add-chore-title">Add chore</h2>
+
+    <label for="chore-name">Name</label>
+    <input id="chore-name" type="text" required placeholder="e.g. vacuum living room">
+
+    <label for="chore-kind">Type</label>
+    <select id="chore-kind">
+      <option value="OneTime">One-time</option>
+      <option value="RecurringAfterCompletion" selected>Recurring (after completion)</option>
+      <option value="RecurringScheduled">Recurring (fixed schedule)</option>
+      <option value="WithDeadline">Deadline</option>
+    </select>
+
+    <!-- Extra fields shown/hidden based on kind -->
+    <div id="field-delay" class="kind-field">
+      <label for="chore-delay">Repeat after (hours)</label>
+      <input id="chore-delay" type="number" min="1" value="168">
+    </div>
+    <div id="field-schedule" class="kind-field" hidden>
+      <label for="chore-schedule">Schedule (e.g. "sunday 20:00")</label>
+      <input id="chore-schedule" type="text" placeholder="sunday 20:00">
+    </div>
+    <div id="field-deadline" class="kind-field" hidden>
+      <label for="chore-deadline">Deadline</label>
+      <input id="chore-deadline" type="datetime-local">
+    </div>
+
+    <div class="dialog-buttons">
+      <button type="submit">Add</button>
+      <button type="button" id="btn-cancel-dialog">Cancel</button>
+    </div>
+  </form>
+</dialog>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>

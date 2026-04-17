@@ -1,0 +1,21 @@
+[package]
+name = "chorgly-backend"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "chorgly-backend"
+path = "src/main.rs"
+
+[dependencies]
+chorgly-core = { path = "../core" }
+serde = { workspace = true }
+ciborium = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+tokio = { workspace = true }
+tokio-tungstenite = "0.24"
+futures-util = "0.3"
+rand = "0.8"
+git2 = "0.19"
+anyhow = "1"

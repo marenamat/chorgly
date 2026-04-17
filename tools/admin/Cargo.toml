@@ -1,0 +1,18 @@
+[package]
+name = "chorgly-admin"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "chorgly-admin"
+path = "src/main.rs"
+
+[dependencies]
+chorgly-core = { path = "../../src/core" }
+serde = { workspace = true }
+ciborium = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+rand = "0.8"
+hex = "0.4"
+anyhow = "1"

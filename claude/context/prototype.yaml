@@ -1,0 +1,30 @@
+recorded_at: '2026-04-18'
+issue: 2
+title: Prototype — chorgly backend + frontend
+
+workspace_layout:
+  - Cargo.toml: workspace root (members: core, backend, frontend, tools/admin)
+  - src/core: chorgly-core — shared Rust types (Chore, User, Database, proto msgs)
+  - src/backend: chorgly-backend — tokio async WebSocket server (port 8765, IPv6-first)
+  - src/frontend: chorgly-frontend — Rust/WASM lib, encode/decode CBOR messages
+  - tools/admin: chorgly-admin — CLI for user management (add/reset-token/list/delete)
+  - docs/app.html: app shell (auth screen + chore list + add-chore dialog)
+  - docs/app.css: app styles
+  - docs/app.js: JS glue (WebSocket, WASM init, DOM render)
+
+key_design_decisions:
+  - CBOR over WebSocket for all messages (ClientMsg / ServerMsg enums)
+  - In-memory DB, flushed to data/db.cbor every hour via git commit in data/ repo
+  - Auth: token lookup in DB, checked on every connection; rotate via admin CLI
+  - Rate limit: 30 msg/s per client session
+  - "Common chore" = assigned_to null; "personal chore" = assigned_to [user_id]
+  - Dependency check at completion time (blocked_by helper on Chore)
+
+open_questions: claude/questions.md  # 6 questions need guardian input
+
+next_steps:
+  - Guardian answers questions (especially Q1 Android, Q2 git repo)
+  - Wire up wasm-pack build in CI (GitHub Actions)
+  - Integration tests for backend (tokio-test)
+  - Proper cron schedule parsing for RecurringScheduled kind
+  - Token auto-read from URL query string (Q6)
