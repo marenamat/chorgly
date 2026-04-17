@@ -1,0 +1,95 @@
+#!/bin/bash
+
+set -e
+
+self=$(readlink -f "$0")
+selfdir=$(dirname "$self")
+
+claude=$(which claude)
+
+dirxx=${selfdir/#$HOME/}
+dirdd=${dirxx//\//__}
+
+git config --local user.name "Claude Worker by Maria"
+git config --local user.email "vibecoding@jmq.cz"
+
+# Optional: if this repo is a fork of claude-base, add the upstream remote
+# so clanker-prep can auto-sync base-owned files (clanker scripts, etc.)
+# without stomping over your project-specific changes.
+#
+#   git remote add claude-base https://github.com/marenamat/claude-base.git
+#
+# Once added, clanker-prep will periodically fetch and apply upstream changes
+# to the files listed in .claude-base-files, and update the [CLAUDE-BASE BEGIN/END]
+# section of CLAUDE.md while preserving your project-specific additions below it.
+
+if which systemctl >/dev/null; then
+
+  systemd=$HOME/.config/systemd/user/
+  mkdir -p $systemd
+
+  # Regular worker: runs every 4 minutes when idle
+  tf=$systemd/$dirdd.timer
+  sf=$systemd/$dirdd.service
+
+  cat >$tf <<EOT
+[Unit]
+Description=Claude Worker Timer for $selfdir
+
+[Timer]
+OnUnitInactiveSec=240
+
+[Install]
+WantedBy=timers.target
+EOT
+
+  cat >$sf <<EOF
+[Unit]
+Description=Claude Worker Service for $selfdir
+
+[Service]
+ExecStart=$selfdir/clanker-run
+
+[Install]
+WantedBy=default.target
+EOF
+
+  # Daily housekeeping: runs at 03:00 local time
+  htf=$systemd/${dirdd}-housekeeping.timer
+  hsf=$systemd/${dirdd}-housekeeping.service
+
+  cat >$htf <<EOT
+[Unit]
+Description=Claude Housekeeping Timer for $selfdir
+
+[Timer]
+OnCalendar=*-*-* 03:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOT
+
+  cat >$hsf <<EOF
+[Unit]
+Description=Claude Housekeeping Service for $selfdir
+
+[Service]
+ExecStart=$selfdir/clanker-housekeeping
+
+[Install]
+WantedBy=default.target
+EOF
+
+  systemctl --user daemon-reload
+
+else
+
+  CF=$(mktemp)
+  crontab -l | grep -v "$selfdir" > $CF
+  echo "*/10 * * * * $selfdir/clanker-run" >>$CF
+  echo "0 3 * * * $selfdir/clanker-housekeeping" >>$CF
+  crontab $CF
+  rm $CF
+
+fi

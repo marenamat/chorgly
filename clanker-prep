@@ -1,0 +1,628 @@
+#!/usr/bin/env python3
+# clanker-prep: Prepare Claude context from git and GitHub, decide if invocation needed.
+# Prints INVOKE_CLAUDE or NOTHING_TO_DO to stdout.
+# All diagnostic output goes to stderr.
+
+import re
+import subprocess
+import json
+import os
+import sys
+import urllib.request
+import urllib.error
+from pathlib import Path
+from datetime import datetime, timezone
+
+try:
+    import yaml
+except ImportError:
+    print("ERROR: PyYAML not installed (pip install pyyaml)", file=sys.stderr)
+    # Fail safe: invoke Claude so it can report the problem
+    print("INVOKE_CLAUDE")
+    sys.exit(0)
+
+AUTHORIZED_USER = "marenamat"
+
+
+def run(cmd):
+    """Run shell command, return (stdout, stderr, returncode)."""
+    result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+    return result.stdout.strip(), result.stderr.strip(), result.returncode
+
+
+def _github_token():
+    """Read GitHub token from git config github.token. Returns token string or None."""
+    token, _, rc = run("git config github.token")
+    return token if rc == 0 and token else None
+
+
+def github_api(path):
+    """Fetch from GitHub API. Returns (data, error_string).
+    Uses token from git config github.token for authentication if available."""
+    url = f"https://api.github.com/{path}"
+    headers = {
+        "User-Agent": "clanker-prep/1.0",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    token = _github_token()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    req = urllib.request.Request(url, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return json.loads(resp.read()), None
+    except urllib.error.HTTPError as e:
+        return None, f"HTTP {e.code}: {e.reason}"
+    except Exception as e:
+        return None, str(e)
+
+
+def get_repo():
+    """Detect GitHub repo owner/name from git remotes.
+    Tries 'github' first (setup-remotes layout), then falls back to 'origin'.
+    """
+    for remote in ("github", "origin"):
+        out, _, rc = run(f"git remote get-url {remote}")
+        if rc != 0 or not out:
+            continue
+        url = out.strip()
+        if url.startswith("https://github.com/"):
+            path = url[len("https://github.com/"):]
+        elif "github.com:" in url:
+            path = url.split("github.com:")[1]
+        else:
+            continue
+        return path.removesuffix(".git").strip("/")
+    return None
+
+
+def get_fetch_remote():
+    """Detect the fetch remote name: tries 'github' first (setup-remotes layout), then 'origin'."""
+    for remote in ("github", "origin"):
+        _, _, rc = run(f"git remote get-url {remote}")
+        if rc == 0:
+            return remote
+    return None
+
+
+def do_git_maintenance():
+    """
+    Fetch from the detected remote, fast-forward main, rebase feature branches, prune merged.
+    Returns list of action strings for context.
+    """
+    actions = []
+
+    remote = get_fetch_remote()
+    if not remote:
+        actions.append("fetch_failed: no usable remote (tried github, origin)")
+        return actions
+
+    # Remember which branch we started on so we can restore it at the end.
+    original_branch, _, _ = run("git branch --show-current")
+
+    # Stash any dirty files BEFORE touching main or any branch.
+    # Context files written by an earlier clanker-prep run are always dirty;
+    # stashing them here prevents "cannot rebase: You have unstaged changes"
+    # errors when fast-forwarding/rebasing main (issue #18).
+    stash_out, _, _ = run("git stash")
+    # git stash prints "No local changes to stash" when nothing to stash
+    stashed = "No local changes" not in stash_out
+
+    try:
+        # Fetch and prune stale remote refs
+        out, err, rc = run(f"git fetch {remote} --prune 2>&1")
+        if rc != 0:
+            print(f"git fetch failed: {out} {err}", file=sys.stderr)
+            actions.append(f"fetch_failed: {err}")
+        else:
+            actions.append("fetched")
+
+        # Fast-forward local main if remote/main is ahead
+        local, _, _ = run("git rev-parse main")
+        remote_main, _, rc = run(f"git rev-parse {remote}/main")
+        if rc != 0:
+            actions.append(f"fetch_failed: cannot resolve {remote}/main")
+            return actions
+
+        if local != remote_main:
+            run("git checkout main")
+            _, err, rc = run(f"git merge --ff-only {remote}/main")
+            if rc == 0:
+                actions.append("main fast-forwarded")
+            else:
+                # ff-only failed (diverging histories) — try rebase instead
+                print(f"ff-only failed, trying rebase of main onto {remote}/main", file=sys.stderr)
+                _, err2, rc2 = run(f"git rebase {remote}/main")
+                if rc2 == 0:
+                    actions.append(f"main rebased onto {remote}/main")
+                else:
+                    run("git rebase --abort")
+                    actions.append(f"main_rebase_failed: {err2}")
+            # Return to original branch before continuing with feature branch rebases
+            restore = original_branch if original_branch and original_branch != "main" else None
+            if restore:
+                run(f"git checkout {restore}")
+
+        # Rebase all local branches (except main) onto local main.
+        # Local main is always >= remote/main after the fast-forward above,
+        # so rebasing onto it avoids replaying already-merged commits.
+        branches_out, _, _ = run("git branch")
+        branches = [line.strip().lstrip("*").strip() for line in branches_out.splitlines()
+                    if line.strip() and line.strip().lstrip("*").strip() not in ("", "main")]
+        for branch in branches:
+            run(f"git checkout {branch}")
+
+            # First, incorporate upstream changes for this branch if the remote
+            # has a tracking branch for it (e.g. origin/issue-10 → local issue-10).
+            _, _, rc = run(f"git rev-parse {remote}/{branch} 2>/dev/null")
+            if rc == 0:
+                # Try rebase onto remote branch first (cleanest history)
+                _, err, rc = run(f"git rebase {remote}/{branch}")
+                if rc != 0:
+                    print(f"Rebase of {branch} onto {remote}/{branch} failed, trying merge", file=sys.stderr)
+                    run("git rebase --abort")
+                    # Fall back to merge when rebase isn't possible
+                    _, err, rc = run(f"git merge --no-ff {remote}/{branch}")
+                    if rc != 0:
+                        run("git merge --abort")
+                        actions.append(f"upstream_merge_failed: {branch}")
+                    else:
+                        actions.append(f"upstream_merged: {branch}")
+                else:
+                    actions.append(f"upstream_rebased: {branch}")
+
+            # Then rebase onto main to get the latest main changes
+            _, err, rc = run("git rebase main")
+            if rc != 0:
+                print(f"Rebase of {branch} onto main failed, aborting", file=sys.stderr)
+                run("git rebase --abort")
+                actions.append(f"rebase_failed: {branch}")
+            else:
+                actions.append(f"rebased: {branch}")
+
+        # Prune local branches fully merged into remote/main
+        merged_out, _, _ = run(f"git branch --merged {remote}/main")
+        for branch in merged_out.splitlines():
+            branch = branch.strip().lstrip("*").strip()
+            if branch and branch != "main":
+                run(f"git branch -d {branch}")
+                actions.append(f"pruned: {branch}")
+
+    finally:
+        # Always return to the original branch and restore stashed changes.
+        restore = original_branch if original_branch else "main"
+        run(f"git checkout {restore}")
+        if stashed:
+            _, _, pop_rc = run("git stash pop")
+            if pop_rc != 0:
+                # Pop failed (conflict with rebased history); drop it.
+                # clanker-prep will regenerate the context files anyway.
+                run("git stash drop")
+                actions.append("stash_pop_failed: context files will be regenerated by prep")
+
+    return actions
+
+
+def sync_claude_md():
+    """
+    Smart-merge upstream CLAUDE.md into local CLAUDE.md.
+    Replaces the [CLAUDE-BASE BEGIN]..[CLAUDE-BASE END] section with the
+    version from claude-base/main while preserving any project-specific
+    content that follows the END marker.
+    Returns True if CLAUDE.md was written (changed or created).
+    """
+    BEGIN = "# [CLAUDE-BASE BEGIN]"
+    END   = "# [CLAUDE-BASE END]"
+
+    # Get upstream CLAUDE.md text
+    upstream_raw, _, rc = run("git show claude-base/main:CLAUDE.md")
+    if rc != 0:
+        return False  # No CLAUDE.md in upstream — nothing to do
+
+    # Extract the base section from upstream.
+    # If upstream already has the markers, grab only that section.
+    # Otherwise treat the entire upstream file as the base section.
+    if BEGIN in upstream_raw and END in upstream_raw:
+        start = upstream_raw.index(BEGIN)
+        end   = upstream_raw.index(END) + len(END)
+        base_block = upstream_raw[start:end]
+    else:
+        base_block = f"{BEGIN}\n{upstream_raw.rstrip()}\n{END}"
+
+    # Read local CLAUDE.md to find any project-specific section.
+    local_path = Path("CLAUDE.md")
+    if local_path.exists():
+        local_raw = local_path.read_text()
+        if END in local_raw:
+            # Preserve everything after the END marker
+            tail = local_raw[local_raw.index(END) + len(END):]
+        else:
+            # No markers yet — wrap existing content as project-specific
+            tail = f"\n\n{local_raw}" if local_raw.strip() else ""
+    else:
+        tail = "\n\n# Project-specific rules\n# (add your project-specific Claude instructions below this line)\n"
+
+    new_content = base_block + tail
+
+    if local_path.exists() and local_path.read_text() == new_content:
+        return False  # Nothing changed
+
+    local_path.write_text(new_content)
+    run("git add CLAUDE.md")
+    return True
+
+
+def do_template_merge():
+    """
+    If a 'claude-base' remote is configured, sync base-owned files from the
+    upstream template into main using a proper merge commit.  The merge commit
+    records claude-base/main as a second parent so the exact upstream commit
+    ID is preserved in project history.
+
+    Strategy:
+      - git merge --no-ff --no-commit --allow-unrelated-histories -s ours
+        sets up the merge state without touching any local files.
+        (--allow-unrelated-histories is required for repos created via
+        "Use this template", which have no shared git history with claude-base.)
+      - Selected files are then checked out from claude-base/main.
+      - CLAUDE.md gets smart-merged (preserves the project-specific section).
+      - A single merge commit finalises the merge and records both parents.
+
+    To opt in, add the remote:
+        git remote add claude-base https://github.com/marenamat/claude-base.git
+    """
+    actions = []
+
+    # Check if the remote exists
+    _, _, rc = run("git remote get-url claude-base 2>/dev/null")
+    if rc != 0:
+        return actions  # No template remote configured
+
+    # Fetch from template
+    out, err, rc = run("git fetch claude-base 2>&1")
+    if rc != 0:
+        print(f"claude-base fetch failed: {err}", file=sys.stderr)
+        actions.append(f"template_fetch_failed: {err}")
+        return actions
+    actions.append("template_fetched")
+
+    # Resolve template's main branch
+    _, _, rc = run("git rev-parse claude-base/main")
+    if rc != 0:
+        actions.append("template_no_main_branch")
+        return actions
+
+    # Skip if template is already an ancestor of local main
+    _, _, rc = run("git merge-base --is-ancestor claude-base/main main")
+    if rc == 0:
+        actions.append("template_up_to_date")
+        return actions
+
+    # Switch to main for the merge
+    current, _, _ = run("git branch --show-current")
+    run("git checkout main")
+
+    # Set up the merge state using 'ours' strategy so our tree stays intact.
+    # --no-commit lets us stage the actual file changes before finalising.
+    _, err, rc = run(
+        "git merge --no-ff --no-commit --allow-unrelated-histories -s ours claude-base/main 2>&1"
+    )
+    if rc != 0:
+        print(f"Template merge setup failed: {err}", file=sys.stderr)
+        run("git merge --abort")
+        actions.append(f"template_merge_failed: {err}")
+        if current and current != "main":
+            run(f"git checkout {current}")
+        return actions
+
+    # Determine which files to sync verbatim.
+    # .claude-base-files itself is always in the list so it self-updates.
+    base_files_path = Path(".claude-base-files")
+    if base_files_path.exists():
+        file_list = [
+            line.strip()
+            for line in base_files_path.read_text().splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        ]
+    else:
+        file_list = ["clanker", "clanker-prep", "clanker-run", "clanker-setup", ".claude-base-files"]
+
+    synced = []
+    failed = []
+
+    for f in file_list:
+        _, err, rc = run(f"git checkout claude-base/main -- {f} 2>&1")
+        if rc == 0:
+            synced.append(f)
+        else:
+            # File may not exist in upstream — skip silently
+            failed.append(f"{f}: {err.strip()}")
+
+    if failed:
+        print(f"Template sync skipped files: {failed}", file=sys.stderr)
+
+    # Smart-merge CLAUDE.md (preserves project-specific section)
+    if sync_claude_md():
+        synced.append("CLAUDE.md")
+
+    # Finalise the merge commit.  Even when no files changed we still commit
+    # so the merge parent (and thus the upstream commit ID) is recorded.
+    updated = ', '.join(synced) if synced else "no file changes"
+    msg = (
+        f"chore: merge claude-base template ({len(synced)} file(s) updated)\n\n"
+        f"Updated: {updated}\n\n"
+        "Workflow authored by Maria Matejka <vibecoding@jmq.cz>"
+    )
+    _, err, rc = run(f'git commit --no-edit -m "{msg}" 2>&1')
+    if rc == 0:
+        actions.append(f"template_merged: {updated}")
+    else:
+        run("git merge --abort")
+        actions.append(f"template_commit_failed: {err}")
+        print(f"Template merge commit failed: {err}", file=sys.stderr)
+
+    if current and current != "main":
+        run(f"git checkout {current}")
+
+    return actions
+
+
+def fetch_issues(repo):
+    """Fetch open issues + comments from GitHub. Returns list of issue dicts."""
+    issues, err = github_api(f"repos/{repo}/issues?state=open&per_page=50")
+    if err:
+        print(f"Issues fetch error: {err}", file=sys.stderr)
+        return None, err
+
+    authorized = [i for i in issues if i["user"]["login"] == AUTHORIZED_USER]
+    result = []
+    for i in authorized:
+        entry = {
+            "number": i["number"],
+            "title": i["title"],
+            "author": i["user"]["login"],
+            "body": i["body"] or "",
+            "created_at": i["created_at"],
+            "labels": [lb["name"] for lb in i.get("labels", [])],
+            "comments": [],
+        }
+        comments, cerr = github_api(f"repos/{repo}/issues/{i['number']}/comments")
+        if cerr:
+            print(f"Comments fetch error for #{i['number']}: {cerr}", file=sys.stderr)
+        elif comments:
+            entry["comments"] = [
+                {"id": c["id"], "author": c["user"]["login"], "body": c["body"]}
+                for c in comments
+            ]
+        result.append(entry)
+    return result, None
+
+
+def fetch_pipelines(repo):
+    """Fetch recent workflow runs from GitHub. Returns list of run dicts."""
+    data, err = github_api(f"repos/{repo}/actions/runs?per_page=20")
+    if err:
+        print(f"Pipeline fetch error: {err}", file=sys.stderr)
+        return None, err
+    runs = data.get("workflow_runs", [])
+    return [
+        {
+            "id": r["id"],
+            "name": r["name"],
+            "status": r["status"],
+            "conclusion": r["conclusion"],
+            "branch": r["head_branch"],
+            "created_at": r["created_at"],
+        }
+        for r in runs
+    ], None
+
+
+def main():
+    selfdir = Path(__file__).parent.resolve()
+    os.chdir(selfdir)
+
+    context_dir = selfdir / "claude" / "context"
+    context_dir.mkdir(parents=True, exist_ok=True)
+
+    now = datetime.now(timezone.utc).isoformat()
+    reasons = []
+
+    # --- Git maintenance ---
+    print("Running git maintenance...", file=sys.stderr)
+    git_actions = do_git_maintenance()
+    print(f"Git actions: {git_actions}", file=sys.stderr)
+
+    # --- Template merge ---
+    print("Checking upstream template (claude-base)...", file=sys.stderr)
+    template_actions = do_template_merge()
+    print(f"Template actions: {template_actions}", file=sys.stderr)
+    git_actions.extend(template_actions)
+
+    # Use 'git branch' and strip the '* ' marker from the current branch
+    branches_out, _, _ = run("git branch")
+    existing_branches = {line.strip().lstrip("*").strip() for line in branches_out.splitlines() if line.strip()}
+
+    git_ctx = {
+        "recorded_at": now,
+        "maintenance_actions": git_actions,
+        "branches": sorted(existing_branches),
+    }
+    with open(context_dir / "git_status.yaml", "w") as f:
+        yaml.dump(git_ctx, f, default_flow_style=False, allow_unicode=True)
+
+    # Rebase failures need Claude to resolve conflicts
+    for action in git_actions:
+        if (action.startswith("rebase_failed:") or action.startswith("template_merge_failed:")
+                or action.startswith("main_rebase_failed:")):
+            reasons.append(action)
+
+    # --- Detect repo ---
+    repo = get_repo()
+    if not repo:
+        print("Cannot detect GitHub repo from remotes (tried: github, origin)", file=sys.stderr)
+        reasons.append("cannot detect GitHub repo - manual check needed")
+
+    # --- Issues ---
+    # Load previously seen comment IDs to detect new comments on handled issues.
+    seen_comments_path = context_dir / "seen_issue_comment_ids.yaml"
+    if seen_comments_path.exists():
+        with open(seen_comments_path) as f:
+            seen_comments_data = yaml.safe_load(f) or {}
+        # Keys are stored as ints in YAML but may load as strings; normalise to int.
+        seen_comment_ids = {int(k): set(v) for k, v in seen_comments_data.get("seen_ids", {}).items()}
+    else:
+        seen_comment_ids = {}
+
+    issues_ctx = {"fetched_at": now, "repo": repo, "issues": []}
+    fetched_issue_ids = []
+    if repo:
+        print(f"Fetching issues for {repo}...", file=sys.stderr)
+        issues, err = fetch_issues(repo)
+        if err:
+            reasons.append(f"issue fetch failed: {err}")
+        elif issues is not None:
+            issues_ctx["issues"] = issues
+            fetched_issue_ids = [i["number"] for i in issues]
+            # Check which issues are referenced in recent main commits
+            recent_log, _, _ = run("git log main --oneline -100")
+            for issue in issues:
+                num = issue["number"]
+                # Handled if a branch references the issue number
+                branch_handled = any(str(num) in b for b in existing_branches)
+                # Also handled if a recent main commit references the issue number
+                commit_handled = f"#{num}" in recent_log or f"issue-{num}" in recent_log
+
+                # Check for new comments regardless of handled state
+                current_cids = {c["id"] for c in issue.get("comments", [])}
+                prev_cids = seen_comment_ids.get(num, set())
+                new_cids = current_cids - prev_cids
+                # Remember all comment IDs seen this run
+                seen_comment_ids[num] = current_cids
+
+                if not branch_handled and not commit_handled:
+                    reasons.append(f"unhandled issue #{num}: {issue['title']}")
+                elif new_cids:
+                    # Issue has a branch or commit, but new comments were posted
+                    reasons.append(f"new comment(s) on issue #{num}: {issue['title']}")
+
+    # Persist seen comment IDs so future runs only trigger on truly new comments.
+    seen_ids_to_save = {k: sorted(v) for k, v in seen_comment_ids.items()}
+    with open(seen_comments_path, "w") as f:
+        yaml.dump({"seen_ids": seen_ids_to_save}, f, default_flow_style=False)
+
+    with open(context_dir / "github_issues.yaml", "w") as f:
+        yaml.dump(issues_ctx, f, default_flow_style=False, allow_unicode=True)
+
+    # --- Pipelines ---
+    # Load previously seen run IDs to avoid re-triggering on already-known failures.
+    seen_ids_path = context_dir / "seen_pipeline_run_ids.yaml"
+    if seen_ids_path.exists():
+        with open(seen_ids_path) as f:
+            seen_data = yaml.safe_load(f) or {}
+            seen_ids = set(seen_data.get("seen_ids", []))
+    else:
+        seen_ids = set()
+
+    pipeline_ctx = {"fetched_at": now, "repo": repo, "runs": []}
+    fetched_pipeline_ids = []
+    if repo:
+        print("Fetching pipeline results...", file=sys.stderr)
+        runs, err = fetch_pipelines(repo)
+        if err:
+            print(f"Pipeline fetch skipped: {err}", file=sys.stderr)
+        elif runs is not None:
+            pipeline_ctx["runs"] = runs
+            fetched_pipeline_ids = [r["id"] for r in runs]
+            for r in runs:
+                if r["id"] not in seen_ids:
+                    # Only trigger on failures we haven't seen before
+                    if r["conclusion"] in ("failure", "action_required") and r["branch"] == "main":
+                        reasons.append(f"pipeline failure on main: {r['name']}")
+                # Mark every fetched run ID as seen regardless of outcome
+                seen_ids.add(r["id"])
+
+    with open(context_dir / "pipeline_results.yaml", "w") as f:
+        yaml.dump(pipeline_ctx, f, default_flow_style=False, allow_unicode=True)
+
+    # Persist seen run IDs so future cycles don't re-trigger on the same failures.
+    # Keep at most 500 IDs to prevent unbounded growth (sorted descending = newest first).
+    seen_list = sorted(seen_ids, reverse=True)[:500]
+    with open(seen_ids_path, "w") as f:
+        yaml.dump({"seen_ids": seen_list}, f, default_flow_style=False)
+
+    # --- Limit retry check (issue #19) ---
+    # If the last recorded run hit the usage limit, Claude couldn't finish its
+    # work.  Retry as soon as possible (i.e. this run) regardless of other signals.
+    runs_jsonl = selfdir / "clanker-runs.jsonl"
+    if runs_jsonl.exists():
+        try:
+            lines = runs_jsonl.read_text().splitlines()
+            # Walk from the end to find the last non-empty JSON line
+            for raw in reversed(lines):
+                raw = raw.strip()
+                if not raw:
+                    continue
+                last_run = json.loads(raw)
+                if last_run.get("limit_hit"):
+                    reasons.append("last run hit usage limit — retrying now")
+                break
+        except Exception as e:
+            print(f"Could not read clanker-runs.jsonl: {e}", file=sys.stderr)
+
+    # --- Dirty workdir check (issues #16, #14) ---
+    # clanker-prep itself writes these files; they're always dirty after a run.
+    # Any other dirty file (including claude/questions.md) means Claude must run.
+    # Using dirty-file detection instead of a questions.md non-empty check avoids
+    # re-triggering when there are unanswered questions left in place (issue #14).
+    PREP_OUTPUTS = {
+        "claude/context/git_status.yaml",
+        "claude/context/github_issues.yaml",
+        "claude/context/pipeline_results.yaml",
+        "claude/context/seen_issue_comment_ids.yaml",
+        "claude/context/seen_pipeline_run_ids.yaml",
+    }
+    dirty_out, _, _ = run("git status --porcelain")
+    dirty_files = []
+    for line in dirty_out.splitlines():
+        if not line.strip():
+            continue
+        # Porcelain v1 format: "XY path" (exactly 2 status chars + space + path).
+        # Use regex to be robust against edge cases where line[3:] could mismatch
+        # (e.g. staged-only files where the Y status char is a space).
+        m = re.match(r'^.{2} (.+)$', line)
+        if not m:
+            continue
+        fname = m.group(1).split(" -> ")[-1].strip()
+        if fname not in PREP_OUTPUTS:
+            dirty_files.append(fname)
+    if dirty_files:
+        reasons.append(f"uncommitted workdir changes: {', '.join(dirty_files)}")
+
+    # --- Decision ---
+    decision = "INVOKE_CLAUDE" if reasons else "NOTHING_TO_DO"
+
+    # Write machine-readable prep summary (overwritten each run)
+    prep_summary = {
+        "recorded_at": now,
+        "decision": decision,
+        "reasons": reasons,
+        "fetched_issues": fetched_issue_ids,
+        "fetched_pipelines": fetched_pipeline_ids,
+        "git_actions": git_actions,
+    }
+    with open(selfdir / "clanker-prep.json", "w") as f:
+        json.dump(prep_summary, f, indent=2)
+        f.write("\n")
+
+    if reasons:
+        print(f"Invoking Claude. Reasons: {reasons}", file=sys.stderr)
+        print("INVOKE_CLAUDE")
+    else:
+        print("Nothing actionable. Skipping Claude.", file=sys.stderr)
+        print("NOTHING_TO_DO")
+
+
+if __name__ == "__main__":
+    main()

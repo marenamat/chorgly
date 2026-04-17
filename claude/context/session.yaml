@@ -1,0 +1,12 @@
+recorded_at: '2026-04-17'
+branch: issue-19
+status: pending_review
+summary: >
+  Implemented issue #19: clanker-prep now reads clanker-runs.jsonl and checks
+  if the last run had limit_hit=true. If so, it adds a reason to invoke Claude
+  again ("last run hit usage limit — retrying now"), ensuring no work is lost
+  when a session is cut short by the usage limit.
+notes:
+  - Change is in clanker-prep, in the new "Limit retry check" block.
+  - No other issues open. Pipeline all green.
+  - Questions: none open.

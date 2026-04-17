@@ -1,0 +1,13 @@
+__pycache__
+clanker.log
+clanker.lock
+clanker-prep.json
+clanker-runs.jsonl
+clanker-current.json
+clanker-housekeeping.json
+# clanker-prep regenerates these every run; no need to track them
+claude/context/git_status.yaml
+claude/context/github_issues.yaml
+claude/context/pipeline_results.yaml
+claude/context/seen_issue_comment_ids.yaml
+claude/context/seen_pipeline_run_ids.yaml

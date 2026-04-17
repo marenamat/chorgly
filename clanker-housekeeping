@@ -1,0 +1,9 @@
+#!/bin/bash
+# clanker-housekeeping: Daily housekeeping invocation.
+# Wraps clanker-run with a housekeeping-specific prompt so Claude
+# checks project health and writes clanker-housekeeping.json.
+
+export CLANKER_PROMPT="perform housekeeping as specified in CLAUDE.md"
+export CLANKER_TASK="housekeeping"
+
+exec "$(dirname "$(readlink -f "$0")")/clanker-run" "$@"
