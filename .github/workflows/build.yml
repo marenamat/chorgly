@@ -29,8 +29,8 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install system deps (openssl, pkg-config)
-        run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev
+      - name: Install system deps (openssl, pkg-config, cmake for libgit2)
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev cmake
 
       # Check all native-target members; exclude the wasm-only frontend crate.
       - name: cargo check (native crates)
@@ -62,7 +62,7 @@ jobs:
           targets: wasm32-unknown-unknown
 
       - name: Install wasm-pack
-        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+        run: cargo install wasm-pack --locked
 
       - name: wasm-pack build
         working-directory: src/frontend
