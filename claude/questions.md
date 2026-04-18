@@ -12,3 +12,5 @@ Without these the "Log in to Docker Hub" step will always fail and the image
 will never be pushed. Please add them under
 **Settings → Secrets and variables → Actions** in the `marenamat/chorgly`
 repository.
+
+*Drop the dockerhub push for now.*
