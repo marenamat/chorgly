@@ -18,6 +18,16 @@ async function main() {
   await init(); // initialise WASM module
   state = new AppState();
 
+  // Q6: read token from URL query string, store it, redirect to clean URL.
+  const params = new URLSearchParams(window.location.search);
+  const urlToken = params.get('token');
+  if (urlToken) {
+    localStorage.setItem(TOKEN_KEY, urlToken);
+    // Redirect to the same URL without the token in it.
+    const clean = window.location.pathname + window.location.hash;
+    window.history.replaceState({}, '', clean);
+  }
+
   const saved = localStorage.getItem(TOKEN_KEY);
   if (saved) {
     showApp();
@@ -93,7 +103,7 @@ function handleServerMsg(msg, token) {
     localStorage.setItem(TOKEN_KEY, token);
     document.getElementById('user-name').textContent = msg.AuthOk.user.name;
     showApp();
-    send('ListChores');
+    send('ListAll');
     return;
   }
 
@@ -111,11 +121,12 @@ function handleServerMsg(msg, token) {
     return;
   }
 
-  // snapshot / chore_changed / chore_deleted → re-render
+  // snapshot / chore_changed / chore_deleted / event_* → re-render
   renderChores();
+  renderEvents();
 }
 
-// ---- rendering ----
+// ---- chore rendering ----
 
 function renderChores() {
   const list = document.getElementById('chore-list');
@@ -142,7 +153,11 @@ function renderChores() {
   for (const c of chores) {
     const li = document.createElement('li');
     li.className = 'chore-item';
-    if (c.depends_on && c.depends_on.length > 0) li.classList.add('blocked');
+
+    // A chore is blocked if it has unmet chore deps or event deps.
+    const blocked = (c.depends_on && c.depends_on.length > 0)
+      || (c.depends_on_events && c.depends_on_events.length > 0);
+    if (blocked) li.classList.add('blocked');
 
     const dueMs = c.next_due ? new Date(c.next_due).getTime() : null;
     if (dueMs && dueMs < now) li.classList.add('overdue');
@@ -151,6 +166,11 @@ function renderChores() {
     title.className = 'chore-title';
     title.textContent = c.title;
 
+    // Show assignee if set.
+    const meta = document.createElement('span');
+    meta.className = 'chore-meta';
+    if (c.assignee) meta.textContent = `→ ${c.assignee}`;
+
     const due = document.createElement('span');
     due.className = 'chore-due';
     due.textContent = dueMs ? formatDue(dueMs, now) : '';
@@ -158,12 +178,12 @@ function renderChores() {
     const btn = document.createElement('button');
     btn.className = 'chore-done-btn';
     btn.textContent = 'Done';
-    btn.disabled = li.classList.contains('blocked');
+    btn.disabled = blocked;
     btn.addEventListener('click', () => {
       send({ CompleteChore: { chore_id: c.id } });
     });
 
-    li.append(title, due, btn);
+    li.append(title, meta, due, btn);
     list.append(li);
   }
 }
@@ -179,6 +199,52 @@ function formatDue(dueMs, nowMs) {
   return diff < 0 ? `overdue ${label}` : `due in ${label}`;
 }
 
+// ---- event rendering (Q3) ----
+
+function renderEvents() {
+  const section = document.getElementById('events-section');
+  const list = document.getElementById('event-list');
+
+  let events;
+  try {
+    events = state.pending_events_json();
+  } catch (e) {
+    console.error('pending_events_json failed', e);
+    return;
+  }
+
+  list.innerHTML = '';
+
+  if (!events || events.length === 0) {
+    section.hidden = true;
+    return;
+  }
+  section.hidden = false;
+
+  for (const ev of events) {
+    const li = document.createElement('li');
+    li.className = 'event-item';
+
+    const name = document.createElement('span');
+    name.className = 'event-name';
+    name.textContent = ev.name;
+
+    const desc = document.createElement('span');
+    desc.className = 'event-desc';
+    desc.textContent = ev.description || '';
+
+    const btn = document.createElement('button');
+    btn.className = 'event-trigger-btn';
+    btn.textContent = 'Happened';
+    btn.addEventListener('click', () => {
+      send({ TriggerEvent: { event_id: ev.id } });
+    });
+
+    li.append(name, desc, btn);
+    list.append(li);
+  }
+}
+
 // ---- auth form ----
 
 document.getElementById('auth-form').addEventListener('submit', (e) => {
@@ -190,23 +256,23 @@ document.getElementById('auth-form').addEventListener('submit', (e) => {
 
 // ---- add-chore buttons ----
 
-const dialog = document.getElementById('add-chore-dialog');
+const choreDialog = document.getElementById('add-chore-dialog');
 let addingPersonal = false;
 
 document.getElementById('btn-add-common').addEventListener('click', () => {
   addingPersonal = false;
   document.getElementById('add-chore-title').textContent = 'Add common chore';
-  dialog.showModal();
+  choreDialog.showModal();
 });
 
 document.getElementById('btn-add-personal').addEventListener('click', () => {
   addingPersonal = true;
   document.getElementById('add-chore-title').textContent = 'Add my chore';
-  dialog.showModal();
+  choreDialog.showModal();
 });
 
 document.getElementById('btn-cancel-dialog').addEventListener('click', () => {
-  dialog.close();
+  choreDialog.close();
 });
 
 // Show/hide extra fields based on chore kind.
@@ -236,14 +302,42 @@ document.getElementById('add-chore-form').addEventListener('submit', (e) => {
     kind = { WithDeadline: { deadline } };
   }
 
-  // assigned_to: null → common; [current user id] → personal
-  // We don't have a clean way to get the user id here without exposing it from WASM.
-  // For the prototype, personal chores are marked by passing an empty-but-non-null list;
-  // the server will fill in the authenticated user's id (TODO: clarify in design).
-  const assigned_to = addingPersonal ? [] : null;
+  // Q4: set permissions based on chore type.
+  // Personal: only I can see / complete; I am the assignee.
+  // Common: everyone sees and can complete, no specific assignee.
+  let visible_to = null;
+  let assignee = null;
+  let can_complete = null;
 
-  send({ AddChore: { title, kind, assigned_to, depends_on: [] } });
-  dialog.close();
+  if (addingPersonal) {
+    const uid = state.current_user_id();
+    visible_to = [uid];
+    assignee = uid;
+    can_complete = [uid];
+  }
+
+  send({ AddChore: { title, kind, visible_to, assignee, can_complete, depends_on: [], depends_on_events: [] } });
+  choreDialog.close();
+});
+
+// ---- add-event button (Q3) ----
+
+const eventDialog = document.getElementById('add-event-dialog');
+
+document.getElementById('btn-add-event').addEventListener('click', () => {
+  eventDialog.showModal();
+});
+
+document.getElementById('btn-cancel-event-dialog').addEventListener('click', () => {
+  eventDialog.close();
+});
+
+document.getElementById('add-event-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const name = document.getElementById('event-name').value.trim();
+  const description = document.getElementById('event-description').value.trim();
+  send({ AddEvent: { name, description } });
+  eventDialog.close();
 });
 
 // ---- init ----

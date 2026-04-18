@@ -199,6 +199,66 @@ dialog select {
   border-radius: 4px;
 }
 
+/* ---- external events section ---- */
+.section-heading {
+  font-size: 0.9rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  opacity: 0.6;
+  margin: 0.5rem 0 0.25rem;
+}
+
+.event-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.event-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--accent, #333);
+  border-left: 3px solid #a84;
+  border-radius: 6px;
+  background: var(--surface, #1a1a1a);
+}
+
+.event-name {
+  flex: 1;
+  font-size: 0.95rem;
+}
+
+.event-desc {
+  font-size: 0.8rem;
+  opacity: 0.55;
+}
+
+.event-trigger-btn {
+  padding: 0.3rem 0.7rem;
+  font-size: 0.82rem;
+  cursor: pointer;
+  border-radius: 4px;
+  background: #a84;
+  color: #fff;
+  border: none;
+}
+
+.chore-meta {
+  font-size: 0.75rem;
+  opacity: 0.5;
+}
+
+.btn-tertiary {
+  background: transparent;
+  border: 1px solid #a84;
+  color: #a84;
+}
+
 /* ---- misc ---- */
 .error {
   color: #e55;

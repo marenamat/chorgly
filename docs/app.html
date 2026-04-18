@@ -40,6 +40,14 @@
 
   <!-- Pending chore list -->
   <main>
+    <!-- External events waiting to be ticked off -->
+    <section id="events-section" hidden>
+      <h2 class="section-heading">Waiting for</h2>
+      <ul id="event-list" class="event-list">
+        <!-- populated by JS -->
+      </ul>
+    </section>
+
     <ul id="chore-list" class="chore-list">
       <!-- populated by JS -->
     </ul>
@@ -50,6 +58,7 @@
   <footer class="app-footer">
     <button id="btn-add-common" class="btn-primary">+ Common chore</button>
     <button id="btn-add-personal" class="btn-secondary">+ My chore</button>
+    <button id="btn-add-event" class="btn-tertiary">+ Watch for…</button>
   </footer>
 
 </section>
@@ -87,6 +96,21 @@
     <div class="dialog-buttons">
       <button type="submit">Add</button>
       <button type="button" id="btn-cancel-dialog">Cancel</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Add-event dialog -->
+<dialog id="add-event-dialog">
+  <form id="add-event-form" method="dialog">
+    <h2>Watch for event</h2>
+    <label for="event-name">Event name</label>
+    <input id="event-name" type="text" required placeholder="e.g. package delivered">
+    <label for="event-description">Description (optional)</label>
+    <input id="event-description" type="text" placeholder="more detail">
+    <div class="dialog-buttons">
+      <button type="submit">Add</button>
+      <button type="button" id="btn-cancel-event-dialog">Cancel</button>
     </div>
   </form>
 </dialog>

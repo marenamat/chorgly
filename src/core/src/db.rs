@@ -1,16 +1,17 @@
 // In-memory database backed by CBOR files.
-// One file per entity type: users.cbor, chores.cbor.
 // Flushed to disk (and then committed to a git repo) at most once per hour.
 
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::{Chore, ChoreId, User, UserId};
+use crate::event::{EventId, ExternalEvent};
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Database {
   pub users: HashMap<UserId, User>,
   pub chores: HashMap<ChoreId, Chore>,
+  pub events: HashMap<EventId, ExternalEvent>,
 }
 
 impl Database {

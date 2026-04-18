@@ -14,13 +14,17 @@ use state::SharedState;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+  // Data directory is configurable via first CLI argument (Q2). Default: ./data
+  let data_dir = std::env::args().nth(1).unwrap_or_else(|| "data".to_string());
+  eprintln!("chorgly-backend data dir: {data_dir}");
+
   // Bind on all interfaces, IPv6 first (dual-stack on Linux serves v4 too).
   let addr: SocketAddr = "[::]:8765".parse()?;
   let listener = TcpListener::bind(addr).await?;
   eprintln!("chorgly-backend listening on {addr}");
 
   // Load DB from disk (or start fresh) and wrap in shared state.
-  let state = Arc::new(SharedState::load_or_default("data").await?);
+  let state = Arc::new(SharedState::load_or_default(data_dir).await?);
 
   // Spawn the hourly persistence task.
   {

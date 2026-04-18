@@ -105,12 +105,7 @@ async fn dispatch(
     match state.auth_user(token).await {
       Some(user) => {
         eprintln!("{peer} authed as {}", user.name);
-        // Send a full snapshot immediately after auth.
-        let chores = state.list_chores().await;
         *authed = Some(user.clone());
-        // We return AuthOk here; the snapshot is sent separately below.
-        // For simplicity in the prototype, embed it in AuthOk isn't great –
-        // instead we return AuthOk and rely on the client to follow up with ListChores.
         return ServerMsg::AuthOk { user };
       }
       None => return ServerMsg::AuthFail { reason: "invalid or expired token".into() },
@@ -126,16 +121,23 @@ async fn dispatch(
   match msg {
     ClientMsg::Auth { .. } => unreachable!(),
 
-    ClientMsg::ListChores => {
-      ServerMsg::Snapshot { chores: state.list_chores().await }
+    ClientMsg::ListAll => {
+      let chores = state.list_chores(user.id).await;
+      let events = state.list_events().await;
+      ServerMsg::Snapshot { chores, events }
     }
 
-    ClientMsg::AddChore { title, kind, assigned_to, depends_on } => {
+    ClientMsg::AddChore {
+      title, kind, visible_to, assignee, can_complete, depends_on, depends_on_events
+    } => {
       let chore = state.add_chore(
         title.clone(),
         kind.clone(),
-        assigned_to.clone(),
+        visible_to.clone(),
+        *assignee,
+        can_complete.clone(),
         depends_on.clone(),
+        depends_on_events.clone(),
         user.id,
       ).await;
       ServerMsg::ChoreAdded(chore)
@@ -151,6 +153,25 @@ async fn dispatch(
     ClientMsg::DeleteChore { chore_id } => {
       match state.delete_chore(*chore_id, user.id).await {
         Ok(()) => ServerMsg::ChoreDeleted { chore_id: *chore_id },
+        Err(e) => ServerMsg::Error { reason: e },
+      }
+    }
+
+    ClientMsg::AddEvent { name, description } => {
+      let event = state.add_event(name.clone(), description.clone(), user.id).await;
+      ServerMsg::EventAdded(event)
+    }
+
+    ClientMsg::TriggerEvent { event_id } => {
+      match state.trigger_event(*event_id, user.id).await {
+        Ok(event) => ServerMsg::EventUpdated(event),
+        Err(e) => ServerMsg::Error { reason: e },
+      }
+    }
+
+    ClientMsg::DeleteEvent { event_id } => {
+      match state.delete_event(*event_id, user.id).await {
+        Ok(()) => ServerMsg::EventDeleted { event_id: *event_id },
         Err(e) => ServerMsg::Error { reason: e },
       }
     }

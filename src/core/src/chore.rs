@@ -1,8 +1,9 @@
+use std::collections::{HashMap, HashSet};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::UserId;
+use crate::{UserId, event::{EventId, ExternalEvent}};
 
 pub type ChoreId = Uuid;
 
@@ -38,13 +39,22 @@ pub struct Chore {
   pub title: String,
   pub kind: ChoreKind,
 
-  /// If Some, only these users see / can complete this chore.
-  /// None means it's a common chore visible to everyone.
-  pub assigned_to: Option<Vec<UserId>>,
+  // --- permission fields (Q4) ---
+  /// Who can see this chore. None = everyone.
+  pub visible_to: Option<Vec<UserId>>,
 
-  /// Chores that must be completed before this one is actionable.
-  /// TODO: external-event dependencies are not yet modelled – see questions.md.
+  /// Primary assignee. None = no specific assignee.
+  pub assignee: Option<UserId>,
+
+  /// Who may mark this chore done. None = everyone.
+  pub can_complete: Option<Vec<UserId>>,
+
+  // --- dependency fields ---
+  /// Other chores that must be completed before this one is actionable.
   pub depends_on: Vec<ChoreId>,
+
+  /// External events that must be triggered before this one is actionable (Q3).
+  pub depends_on_events: Vec<EventId>,
 
   pub created_at: DateTime<Utc>,
   pub created_by: UserId,
@@ -59,8 +69,24 @@ impl Chore {
     self.completions.last()
   }
 
+  /// True if `user` can see this chore.
+  pub fn visible_to_user(&self, user: UserId) -> bool {
+    match &self.visible_to {
+      None => true,
+      Some(list) => list.contains(&user),
+    }
+  }
+
+  /// True if `user` is allowed to complete this chore.
+  pub fn completable_by(&self, user: UserId) -> bool {
+    match &self.can_complete {
+      None => true,
+      Some(list) => list.contains(&user),
+    }
+  }
+
   /// Compute when this chore is next due, given the current time.
-  /// Returns None if the chore is not currently due.
+  /// Returns None if the chore has no pending work.
   pub fn next_due(&self, now: DateTime<Utc>) -> Option<DateTime<Utc>> {
     match &self.kind {
       ChoreKind::OneTime => {
@@ -72,13 +98,12 @@ impl Chore {
           None => Some(now), // never done → due immediately
           Some(c) => {
             let due = c.completed_at + chrono::Duration::seconds(*delay_secs as i64);
-            if due <= now { Some(due) } else { Some(due) }
+            Some(due) // always return the due date (may be past or future)
           }
         }
       }
 
-      // Scheduled recurrence: next due date must be computed from the schedule string.
-      // For the prototype this always returns now; proper cron parsing is future work.
+      // Scheduled recurrence: proper cron parsing is future work.
       ChoreKind::RecurringScheduled { .. } => Some(now),
 
       ChoreKind::WithDeadline { deadline } => {
@@ -91,15 +116,23 @@ impl Chore {
     }
   }
 
-  /// True if this chore has unresolved dependencies.
-  pub fn blocked_by<'a>(&self, all: impl Iterator<Item = &'a Chore>) -> Vec<ChoreId> {
-    let completed_ids: std::collections::HashSet<ChoreId> = all
+  /// True if this chore is blocked by unmet chore or event dependencies.
+  pub fn is_blocked(
+    &self,
+    all_chores: &HashMap<ChoreId, Chore>,
+    all_events: &HashMap<EventId, ExternalEvent>,
+  ) -> bool {
+    // Check chore dependencies: each dep must have at least one completion.
+    let completed_chores: HashSet<ChoreId> = all_chores.values()
       .filter(|c| !c.completions.is_empty())
       .map(|c| c.id)
       .collect();
-    self.depends_on.iter()
-      .filter(|dep| !completed_ids.contains(dep))
-      .copied()
-      .collect()
+    let chore_blocked = self.depends_on.iter().any(|dep| !completed_chores.contains(dep));
+
+    // Check event dependencies: each dep must be triggered.
+    let event_blocked = self.depends_on_events.iter()
+      .any(|eid| !all_events.get(eid).map_or(false, |e| e.triggered));
+
+    chore_blocked || event_blocked
   }
 }

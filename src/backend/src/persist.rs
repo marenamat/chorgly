@@ -1,4 +1,5 @@
 // Hourly persistence: write db.cbor and commit to a git repo.
+// The data repo is initialised automatically if absent (Q2).
 
 use std::sync::Arc;
 use std::path::Path;
@@ -30,17 +31,24 @@ async fn flush(state: &SharedState) -> anyhow::Result<()> {
   std::fs::write(&db_path, &cbor)?;
   eprintln!("flushed {} bytes to {}", cbor.len(), db_path.display());
 
-  // Commit to the data git repo if it exists.
-  // The repo must already be initialised; we never create it here.
+  // Commit to the data git repo, initialising it if absent (Q2).
   if let Err(e) = git_commit(&state.data_dir) {
-    eprintln!("git commit skipped: {e}");
+    eprintln!("git commit error: {e}");
   }
 
   Ok(())
 }
 
 fn git_commit(data_dir: &Path) -> anyhow::Result<()> {
-  let repo = git2::Repository::open(data_dir)?;
+  // Open existing repo or initialise a new one (Q2).
+  let repo = match git2::Repository::open(data_dir) {
+    Ok(r) => r,
+    Err(_) => {
+      eprintln!("initialising new git repo at {}", data_dir.display());
+      git2::Repository::init(data_dir)?
+    }
+  };
+
   let mut index = repo.index()?;
   index.add_path(Path::new("db.cbor"))?;
   index.write()?;

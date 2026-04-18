@@ -1,10 +1,31 @@
 recorded_at: '2026-04-18'
-branch: issue-1
-status: branch ready for review
+branch: issue-2
+status: in progress — guardian answers Q2-Q6 implemented
 summary: >
-  Worked issue #1 (bootstrap): fixed README.md for chorgly, replaced
-  docs/index.html with chorgly landing page, updated docs/style.css comment.
-  Cleared resolved GitHub Pages question from questions.md (guardian set to actions).
+  Implemented guardian answers from questions.md (Q2-Q6):
+  Q2: data git repo now configurable via CLI arg (first arg, default ./data);
+      repo is auto-initialised with git2 if absent (persist.rs).
+  Q3: ExternalEvent type added (core/event.rs); DB stores events; protocol
+      has AddEvent / TriggerEvent / DeleteEvent; frontend shows "Waiting for"
+      section with "Happened" buttons; users tick off events manually.
+  Q4: Chore permissions refactored — visible_to / assignee / can_complete
+      replace the single assigned_to field; common chores default to None
+      (everyone); personal chores set all three to the creator's user ID.
+  Q5: Confirmed already correct — one completion resets timer for all.
+  Q6: Token auto-read from URL ?token= param: stored in localStorage,
+      URL cleaned with history.replaceState, then connects silently (app.js).
+  Also added serde-wasm-bindgen and serde_json to frontend Cargo.toml
+  (were missing, needed by existing WASM glue code).
+  Design doc (claude/design/chorgly.md) updated with all resolutions.
+  questions.md now contains only Q1 (Android target — still awaiting answer).
 notes:
-  - Pipeline failure (run 24584609081) was GitHub Pages not enabled; guardian fixed it.
-  - issue-1 branch is ready for guardian review and merge.
+  - Local cargo check fails on openssl-sys (pkg-config missing in dev env);
+    CI should work as before since this is a pre-existing git2 dep issue.
+  - WASM build is not yet in CI (noted as future work in prototype.yaml).
+  - ListChores renamed to ListAll in proto (now returns chores + events).
+next_steps:
+  - Guardian reviews and merges issue-2
+  - Wire up wasm-pack build in CI
+  - Integration tests for backend
+  - Proper cron schedule parsing for RecurringScheduled kind
+  - Smarter client-side blocked check (compute from state, not just dep list length)
