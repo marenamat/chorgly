@@ -41,24 +41,30 @@ impl SharedState {
 
   // ------ auth ------
 
-  /// Authenticate a user by token (session or init).
-  /// If the token matches an unused init_token, it is consumed (write lock).
-  pub async fn auth_user(&self, token: &str) -> Option<User> {
+  /// Check a token without side effects. Returns the user and whether it was
+  /// an init_token (which must be consumed after AuthOk is sent).
+  pub async fn try_auth(&self, token: &str) -> Option<(User, bool)> {
     let now = Utc::now();
+    let db = self.db.read().await;
 
-    // Fast path: valid session token (read lock only).
-    {
-      let db = self.db.read().await;
-      if let Some(user) = db.user_by_token(token).filter(|u| u.token_valid_at(now)) {
-        return Some(user.clone());
-      }
+    // Valid session token.
+    if let Some(user) = db.user_by_token(token).filter(|u| u.token_valid_at(now)) {
+      return Some((user.clone(), false));
     }
 
-    // Slow path: init token — consume it on success (write lock).
+    // Init token (not yet consumed — caller must call consume_init_token after AuthOk).
+    if let Some(user) = db.user_by_init_token(token) {
+      return Some((user.clone(), true));
+    }
+
+    None
+  }
+
+  /// Consume the init_token for a user. Call this only after AuthOk is delivered.
+  /// If the connection drops before delivery, the token remains valid for retry.
+  pub async fn consume_init_token(&self, user_id: UserId) {
     let mut db = self.db.write().await;
-    let user = db.user_by_init_token(token).cloned()?;
-    db.consume_init_token(user.id);
-    Some(user)
+    db.consume_init_token(user_id);
   }
 
   // ------ chores ------

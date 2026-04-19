@@ -7,7 +7,7 @@ use std::sync::Arc;
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::{SinkExt, StreamExt};
 
-use chorgly_core::{ClientMsg, ServerMsg, User};
+use chorgly_core::{ClientMsg, ServerMsg, User, UserId};
 use crate::state::SharedState;
 
 // Per-client rate limit: max 30 messages per second.
@@ -77,9 +77,14 @@ async fn handle(
           }
         };
 
-        let reply = dispatch(&client_msg, &mut authed_user, &state, peer).await;
+        let (reply, consumed_init_user) = dispatch(&client_msg, &mut authed_user, &state, peer).await;
         let bytes = cbor_encode(&reply)?;
+        // Send the reply first; only consume the init_token once delivery succeeds,
+        // so a dropped connection before AuthOk doesn't burn the token.
         sink.send(Message::Binary(bytes.into())).await?;
+        if let Some(uid) = consumed_init_user {
+          state.consume_init_token(uid).await;
+        }
       }
     }
   }
@@ -87,32 +92,35 @@ async fn handle(
   Ok(())
 }
 
-/// Map a ClientMsg to the ServerMsg reply.
+/// Map a ClientMsg to (reply, Option<UserId-of-consumed-init-token>).
+/// The UserId is Some only for successful init_token auth; caller must call
+/// consume_init_token after sending the reply to the client.
 async fn dispatch(
   msg: &ClientMsg,
   authed: &mut Option<User>,
   state: &SharedState,
   peer: SocketAddr,
-) -> ServerMsg {
+) -> (ServerMsg, Option<UserId>) {
   // Auth must come first.
   if let ClientMsg::Auth { token } = msg {
-    match state.auth_user(token).await {
-      Some(user) => {
+    match state.try_auth(token).await {
+      Some((user, is_init)) => {
         eprintln!("{peer} authed as {}", user.name);
+        let uid = if is_init { Some(user.id) } else { None };
         *authed = Some(user.clone());
-        return ServerMsg::AuthOk { user };
+        return (ServerMsg::AuthOk { user }, uid);
       }
-      None => return ServerMsg::AuthFail { reason: "invalid or expired token".into() },
+      None => return (ServerMsg::AuthFail { reason: "invalid or expired token".into() }, None),
     }
   }
 
   // Everything else requires authentication.
   let user = match authed {
     Some(u) => u.clone(),
-    None => return ServerMsg::Error { reason: "not authenticated".into() },
+    None => return (ServerMsg::Error { reason: "not authenticated".into() }, None),
   };
 
-  match msg {
+  let msg = match msg {
     ClientMsg::Auth { .. } => unreachable!(),
 
     ClientMsg::ListAll => {
@@ -169,7 +177,9 @@ async fn dispatch(
         Err(e) => ServerMsg::Error { reason: e },
       }
     }
-  }
+  };
+
+  (msg, None)
 }
 
 fn cbor_encode(msg: &ServerMsg) -> anyhow::Result<Vec<u8>> {

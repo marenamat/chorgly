@@ -1,0 +1,32 @@
+issue: 4
+title: automatic tests
+branch: issue-4
+based_on: main
+recorded_at: '2026-04-19T19:00:00+00:00'
+status: in_progress
+
+work_done:
+  - Added init_token: Option<String> to User struct (with #[serde(default)] for
+    backward compat with existing DB files)
+  - Added user_by_init_token and consume_init_token to Database
+  - Rewrote auth_user as try_auth (read lock only, returns bool for init_token match)
+    and separate consume_init_token method (write lock)
+  - init_token is consumed ONLY after AuthOk is delivered (via sink.send), so
+    a dropped connection before AuthOk does NOT burn the token
+  - admin add-user now generates both a session token and an init_token (one-time URL link)
+  - Carried forward CI fixes from issue-3 (Clone on ServerMsg, ciborium type
+    annotation, anyhow::Error::from) since this branch is based on pre-fix main
+  - Added uuid js feature to frontend/Cargo.toml for wasm32 target
+  - tests/gen_testdata.py: generates tests/testdata/db.cbor with 4 known users
+    (alice=valid session, bob=expired session, carol=init_token, dave=second_init_token)
+    and tokens.yaml with token values for the test script
+  - tests/test_auth.py: 7 auth test cases (see issue #4 description), uses cbor2
+    and websockets, runs against WS_URL env var (default ws://[::1]:8080/ws)
+  - .github/workflows/integration.yml: CI job that builds Docker image, runs
+    container with testdata mounted, waits for ready, runs test_auth.py
+  - tests/testdata/ added to .gitignore (generated data)
+
+pending:
+  - CI run needed to confirm Docker build succeeds and tests pass
+  - Dockerfile still uses curl|sh for wasm-pack (may need to align with
+    build.yml's cargo install --locked approach if Docker CI fails for wasm)

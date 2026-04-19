@@ -1,0 +1,78 @@
+# Integration tests for chorgly.
+#
+# Builds the Docker image, starts a container with mock test data, runs the
+# Python auth test suite against the live WebSocket endpoint, then tears down.
+#
+# Depends on the Docker build succeeding (docker.yml runs in parallel, so we
+# build the image inline here rather than relying on a pushed image).
+
+name: Integration Tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  auth-tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image (for testing)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          load: true
+          tags: chorgly:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python test dependencies
+        run: pip install cbor2 websockets pyyaml
+
+      - name: Generate test data
+        run: python3 tests/gen_testdata.py
+
+      - name: Start chorgly container with test data
+        run: |
+          docker run -d \
+            --name chorgly-test \
+            -p 127.0.0.1:8080:8080 \
+            -v "${{ github.workspace }}/tests/testdata:/data" \
+            -e CHORGLY_DATA=/data \
+            -e CHORGLY_PORT=8080 \
+            chorgly:test
+
+      - name: Wait for backend to be ready
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:8080/ >/dev/null 2>&1; then
+              echo "Backend ready after ${i}s"
+              break
+            fi
+            sleep 1
+          done
+
+      - name: Run auth integration tests
+        env:
+          WS_URL: "ws://127.0.0.1:8080/ws"
+        run: python3 tests/test_auth.py
+
+      - name: Collect container logs on failure
+        if: failure()
+        run: docker logs chorgly-test
+
+      - name: Stop container
+        if: always()
+        run: docker rm -f chorgly-test || true
