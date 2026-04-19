@@ -51,7 +51,7 @@ async fn handle(
           Some(Ok(Message::Binary(b))) => b,
           Some(Ok(Message::Close(_))) | None => break,
           Some(Ok(_)) => continue, // ignore text/ping/pong frames
-          Some(Err(e)) => return Err(e.into()),
+          Some(Err(e)) => return Err(anyhow::Error::from(e)),
         };
 
         // Rate limiting.
@@ -68,7 +68,7 @@ async fn handle(
           break;
         }
 
-        let client_msg: ClientMsg = match ciborium::de::from_reader(raw.as_ref()) {
+        let client_msg: ClientMsg = match ciborium::de::from_reader(&raw[..]) {
           Ok(m) => m,
           Err(e) => {
             let err = cbor_encode(&ServerMsg::Error { reason: format!("bad message: {e}") })?;

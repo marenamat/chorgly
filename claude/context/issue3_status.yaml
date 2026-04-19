@@ -2,7 +2,7 @@ issue: 3
 title: Deployment
 branch: issue-3
 based_on: main
-recorded_at: '2026-04-19T16:00:00+00:00'
+recorded_at: '2026-04-19T18:00:00+00:00'
 status: pending_review
 
 work_done:
@@ -19,11 +19,10 @@ work_done:
   - docker.yml: pushes on all branch pushes, tags by sanitised branch name
   - docker.yml: uses GITHUB_TOKEN (no extra secrets needed)
   - Branch rebased cleanly onto main (cherry-picked past template merge conflict)
+  - Fixed CI failures (found locally once guardian fixed PATH for cargo):
+      - Added Clone to ServerMsg derive (needed for tokio broadcast::channel)
+      - Fixed ciborium from_reader type inference: &raw[..] instead of raw.as_ref()
+      - Fixed anyhow error conversion: anyhow::Error::from(e) to resolve ambiguity
+      - Added uuid js feature to frontend Cargo.toml for wasm32-unknown-unknown target
 
-ci_failures_unresolved:
-  - native (cargo check --workspace --exclude chorgly-frontend): exits 101
-  - wasm (wasm-pack build): exits 1
-  - Cannot access raw CI logs without admin rights; annotations give no detail
-  - Code review found no obvious compilation errors in core/backend/admin/frontend
-  - cmake fix (fe87cea) did not resolve the failures
-  - Asked guardian to install rustup or share compiler error output (see questions.md)
+ci_status: all local checks pass (cargo check native, cargo check wasm, cargo test core)

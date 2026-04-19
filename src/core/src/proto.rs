@@ -50,7 +50,7 @@ pub enum ClientMsg {
 
 // ---------- server → client ----------
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ServerMsg {
   /// Response to Auth.
   AuthOk { user: User },
