@@ -38,7 +38,14 @@ crypto_details:
   key_validity: 7 days
   rekey_trigger: client-side, when elapsed >= validity/4 (42h for 7-day keys)
 
+rebase_2026_04_19:
+  - Rebased issue-5 onto main (which merged issue-4 with token-based auth tests)
+  - Resolved conflicts in session.rs, state.rs, integration.yml, gen_testdata.py, test_auth.py
+  - ECDSA auth supersedes issue-4 changes; tests now use EC key challenge-response
+  - Fixed frontend state.rs: added Challenge match arm (was non-exhaustive)
+  - Simplified AuthState::Authenticated to unit variant (no unused fields)
+  - Removed DispatchResult::None (never constructed)
+  - Build is clean (no errors, no warnings)
+
 pending:
   - Guardian must push issue-5 branch to trigger CI integration tests
-  - Note: issue-4 (auth integration tests) tests the old token-based auth and will
-    need to be updated/dropped when this branch is merged

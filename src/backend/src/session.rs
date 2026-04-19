@@ -31,12 +31,8 @@ enum AuthState {
     challenge: Vec<u8>,    // 32 random bytes sent to the client
     pubkey_spki: Vec<u8>,  // client's claimed public key
     user_id: UserId,
-    init_token: String,    // must be consumed after AuthOk
   },
-  Authenticated {
-    user: User,
-    key_id: String,        // key_id of the currently active signing key
-  },
+  Authenticated,
 }
 
 pub async fn run(ws: WebSocket, peer: SocketAddr, state: Arc<SharedState>) {
@@ -62,7 +58,7 @@ async fn handle(
     tokio::select! {
       // Forward broadcast messages to this client (only when authed).
       bcast = broadcast_rx.recv() => {
-        if matches!(auth, AuthState::Authenticated { .. }) {
+        if matches!(auth, AuthState::Authenticated) {
           if let Ok(msg) = bcast {
             let bytes = cbor_encode(&msg)?;
             sink.send(Message::Binary(bytes.into())).await?;
@@ -111,7 +107,6 @@ async fn handle(
             sink.send(Message::Binary(cbor_encode(&msg)?.into())).await?;
             state.consume_init_token(user_id).await;
           }
-          DispatchResult::None => {}
         }
       }
     }
@@ -123,7 +118,6 @@ async fn handle(
 enum DispatchResult {
   Reply(ServerMsg),
   AuthOk { msg: ServerMsg, user_id: UserId },
-  None,
 }
 
 async fn dispatch(
@@ -154,7 +148,6 @@ async fn dispatch(
         challenge: challenge.clone(),
         pubkey_spki,
         user_id: user.id,
-        init_token,
       };
 
       DispatchResult::Reply(ServerMsg::Challenge { token: challenge })
@@ -162,7 +155,7 @@ async fn dispatch(
 
     // --- key registration: step 3 ---
     ClientMsg::ConfirmKey { signature } => {
-      let AuthState::PendingChallenge { challenge, pubkey_spki, user_id, init_token } =
+      let AuthState::PendingChallenge { challenge, pubkey_spki, user_id } =
         std::mem::replace(auth, AuthState::Unauthenticated)
       else {
         return DispatchResult::Reply(ServerMsg::AuthFail {
@@ -183,7 +176,7 @@ async fn dispatch(
       let user = state.register_pubkey(user_id, pubkey_spki.clone()).await;
       let key_id = crate::state::spki_key_id(&pubkey_spki);
       eprintln!("{peer} registered key {key_id:.12}… as {}", user.name);
-      *auth = AuthState::Authenticated { user: user.clone(), key_id };
+      *auth = AuthState::Authenticated;
 
       DispatchResult::AuthOk {
         msg: ServerMsg::AuthOk { user },
@@ -218,7 +211,7 @@ async fn dispatch(
         }
       }
 
-      *auth = AuthState::Authenticated { user: user.clone(), key_id: key_id.clone() };
+      *auth = AuthState::Authenticated;
 
       let inner: SignedPayload = match ciborium::de::from_reader(&payload[..]) {
         Ok(m) => m,

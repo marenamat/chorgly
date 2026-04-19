@@ -73,6 +73,8 @@ impl AppState {
         "event_deleted"
       }
       Error { .. } => "error",
+      // Challenge is handled directly in JS during registration; ignore here.
+      Challenge { .. } => "challenge",
     };
     Ok(event.to_string())
   }
