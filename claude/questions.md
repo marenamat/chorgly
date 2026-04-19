@@ -14,3 +14,5 @@ a) Install `rustup` + Rust stable so I can run `cargo check` locally and fix
    whatever is broken; or
 b) Paste the relevant compiler error lines from the failed CI run into a
    comment on issue #3, and I will fix them on the next run.
+
+*fixed $PATH so that rustup and cargo are available now*
