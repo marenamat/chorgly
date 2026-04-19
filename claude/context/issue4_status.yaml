@@ -2,7 +2,7 @@ issue: 4
 title: automatic tests
 branch: issue-4
 based_on: main
-recorded_at: '2026-04-19T19:00:00+00:00'
+recorded_at: '2026-04-19T21:00:00+00:00'
 status: pending_review
 
 work_done:
@@ -14,25 +14,23 @@ work_done:
   - init_token is consumed ONLY after AuthOk is delivered (via sink.send), so
     a dropped connection before AuthOk does NOT burn the token
   - admin add-user now generates both a session token and an init_token (one-time URL link)
-  - Carried forward CI fixes from issue-3 (Clone on ServerMsg, ciborium type
-    annotation, anyhow::Error::from) since this branch is based on pre-fix main
-  - Added uuid js feature to frontend/Cargo.toml for wasm32 target
   - tests/gen_testdata.py: generates tests/testdata/db.cbor with 4 known users
     (alice=valid session, bob=expired session, carol=init_token, dave=second_init_token)
     and tokens.yaml with token values for the test script
-  - tests/test_auth.py: 7 auth test cases (see issue #4 description), uses cbor2
-    and websockets, runs against WS_URL env var (default ws://[::1]:8080/ws)
+  - tests/test_auth.py: 7 auth test cases + ListAll success/failure checks
+    (per issue #4 comment: verify ListAll→Snapshot after good auth, Error after bad auth)
   - .github/workflows/integration.yml: CI job that builds Docker image, runs
     container with testdata mounted, waits for ready, runs test_auth.py
   - tests/testdata/ added to .gitignore (generated data)
+  - Rebased successfully onto main (resolved docs/index.html conflict from df96f22)
 
 pending:
   - Guardian must push issue-4 branch to trigger CI integration tests
-  - Dockerfile still uses curl|sh for wasm-pack (may need to align with
-    build.yml's cargo install --locked approach if Docker CI fails for wasm)
+  - Dockerfile uses curl|sh for wasm-pack; if Docker CI fails consider switching
+    to cargo install wasm-pack --locked (as done in build.yml)
 
 rebase_history:
-  - Rebased 2026-04-19: dropped 7a95a64 (first-access impl already merged into
-    main as 74f5b25); replayed d01f21e (integration tests) onto origin/main.
-    Only conflict was frontend/Cargo.toml (uuid js feature comment); resolved
-    by keeping main's comment.
+  - Rebased 2026-04-19 (session 1): dropped 7a95a64 (first-access impl already
+    merged into main as 74f5b25); replayed d01f21e (integration tests) onto origin/main.
+  - Rebased 2026-04-19 (session 2): resolved conflict in docs/index.html from
+    df96f22 (kept chorgly-specific content, dropped accidentally-included claude-base docs).
