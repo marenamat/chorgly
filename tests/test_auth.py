@@ -99,12 +99,33 @@ async def run_tests():
             repr(resp),
         )
 
-    # 4. Access allowed with valid session token.
+    # 4. Access allowed with valid session token; ListAll returns Snapshot.
     async with websockets.connect(WS_URL) as ws:
         resp = await send_auth(ws, valid_token)
         check(
             "access allowed with valid session token",
             "AuthOk" in resp,
+            repr(resp),
+        )
+        resp = await send_list_all(ws)
+        check(
+            "ListAll succeeds after valid auth",
+            "Snapshot" in resp,
+            repr(resp),
+        )
+
+    # 4b. ListAll denied without prior auth.
+    async with websockets.connect(WS_URL) as ws:
+        resp = await send_auth(ws, "completely-wrong-token-for-listall-test")
+        check(
+            "auth fails for ListAll-denial test (precondition)",
+            "AuthFail" in resp,
+            repr(resp),
+        )
+        resp = await send_list_all(ws)
+        check(
+            "ListAll denied after failed auth",
+            "Error" in resp,
             repr(resp),
         )
 
