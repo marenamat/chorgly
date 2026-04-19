@@ -15,3 +15,5 @@ sudo apt-get install -y pkg-config libssl-dev cmake perl
 
 The `rustup`/`cargo` PATH issue was fixed — Rust itself is available. Only
 the C-level build dependencies are still missing locally.
+
+*Installed. Please note that you are running on Alpine, not Bubuntu.*
