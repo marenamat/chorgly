@@ -2,7 +2,7 @@ issue: 3
 title: Deployment
 branch: issue-3
 based_on: main
-recorded_at: '2026-04-19T18:00:00+00:00'
+recorded_at: '2026-04-19T18:30:00+00:00'
 status: pending_review
 
 work_done:
@@ -24,5 +24,7 @@ work_done:
       - Fixed ciborium from_reader type inference: &raw[..] instead of raw.as_ref()
       - Fixed anyhow error conversion: anyhow::Error::from(e) to resolve ambiguity
       - Added uuid js feature to frontend Cargo.toml for wasm32-unknown-unknown target
+  - Branch successfully rebased onto main after guardian answered Alpine/packages question
+    (conflict in claude/questions.md resolved: question resolved, kept "(no open questions)")
 
-ci_status: all local checks pass (cargo check native, cargo check wasm, cargo test core)
+ci_status: fixes on branch; main CI still failing until issue-3 is merged
