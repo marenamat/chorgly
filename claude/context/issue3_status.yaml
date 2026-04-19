@@ -1,8 +1,8 @@
 issue: 3
 title: Deployment
 branch: issue-3
-based_on: issue-2
-recorded_at: '2026-04-18T18:00:00+00:00'
+based_on: main
+recorded_at: '2026-04-19T16:00:00+00:00'
 status: pending_review
 
 work_done:
@@ -12,9 +12,18 @@ work_done:
   - Updated app.js WS_URL from hardcoded :8765 to same-host /ws path
   - Multi-stage Dockerfile (wasm-builder → native-builder → debian:bookworm-slim runtime)
   - /data (VOLUME) for CBOR database, /config (VOLUME) reserved for future config
-  - .github/workflows/docker.yml builds + pushes to DockerHub on main push and version tags
-  - Supports linux/amd64 and linux/arm64 via Buildx
+  - cmake added to native-builder stage in Dockerfile (needed for libgit2-sys)
+  - cmake added to native CI job (build.yml) for libgit2-sys build
+  - wasm-pack installation fixed: switched from curl-pipe-sh to cargo install --locked
+  - docker.yml: switched from DockerHub to ghcr.io (GitHub Container Registry)
+  - docker.yml: pushes on all branch pushes, tags by sanitised branch name
+  - docker.yml: uses GITHUB_TOKEN (no extra secrets needed)
+  - Branch rebased cleanly onto main (cherry-picked past template merge conflict)
 
-notes:
-  - DockerHub push requires DOCKERHUB_USERNAME and DOCKERHUB_TOKEN secrets in the repo
-  - issue-3 branches from issue-2 (prototype); rebase onto main after issue-2 merges
+ci_failures_unresolved:
+  - native (cargo check --workspace --exclude chorgly-frontend): exits 101
+  - wasm (wasm-pack build): exits 1
+  - Cannot access raw CI logs without admin rights; annotations give no detail
+  - Code review found no obvious compilation errors in core/backend/admin/frontend
+  - cmake fix (fe87cea) did not resolve the failures
+  - Asked guardian to install rustup or share compiler error output (see questions.md)

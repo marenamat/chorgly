@@ -50,7 +50,7 @@ RUN wasm-pack build --target web --out-dir /wasm-out src/frontend
 FROM rust:slim AS native-builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    pkg-config libssl-dev \
+    pkg-config libssl-dev cmake \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build

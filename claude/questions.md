@@ -1,16 +1,16 @@
 # Questions / Action items for guardian
 
-## Docker Hub secrets needed (issue #3)
+## CI: Build & Test still failing (cargo check + wasm-pack)
 
-The Docker CI workflow (`docker.yml`) requires two repository secrets to be
-configured in GitHub:
+Both the native `cargo check --workspace --exclude chorgly-frontend` and
+`wasm-pack build` steps fail on every CI run. The cmake fix in `fe87cea` did
+not resolve it. Code review has found no obvious compilation errors.
 
-- `DOCKERHUB_USERNAME` — Docker Hub account name
-- `DOCKERHUB_TOKEN` — Docker Hub access token (read/write)
+I cannot access raw CI logs (403 without admin rights) and the local
+environment has no Rust toolchain, so I cannot reproduce the error.
 
-Without these the "Log in to Docker Hub" step will always fail and the image
-will never be pushed. Please add them under
-**Settings → Secrets and variables → Actions** in the `marenamat/chorgly`
-repository.
-
-*Drop the dockerhub push for now.*
+**Please either:**
+a) Install `rustup` + Rust stable so I can run `cargo check` locally and fix
+   whatever is broken; or
+b) Paste the relevant compiler error lines from the failed CI run into a
+   comment on issue #3, and I will fix them on the next run.
